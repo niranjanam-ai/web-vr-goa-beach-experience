@@ -60,4 +60,3 @@ web-vr-goa-beach-experience/
 **Niranjana M**
 
 
-Available next action: Create a downloadable DOCX file here in this chat containing the editable prose above
