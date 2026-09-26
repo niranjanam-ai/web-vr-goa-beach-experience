@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Goa Luxury Beach VR Experience</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  /* ============================================================
+     GLOBAL / CANVAS
+     Recreates: full-bleed WebGL canvas behind the UI overlay,
+     matches the dark app-shell background visible around the
+     rendered viewport in Fig 1.1 / Fig 2.1 screenshots.
+  ============================================================ */
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  canvas#app { display: block; width: 100%; height: 100%; }
+
+  /* ============================================================
+     UI OVERLAY (Section 4-A of the document)
+     Title panel + instructions, glassmorphism style:
+     semi-transparent black background, backdrop blur, rounded
+     corners, fixed to top-center of viewport via translateX(-50%)
+  ============================================================ */
+  #ui {
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,.35);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 18px;
+    padding: 14px 28px;
+    text-align: center;
+    color: #fff;
+    z-index: 100;
+    pointer-events: none;
+    user-select: none;
+  }
+  #ui h2 {
+    margin: 0 0 4px 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  #ui p {
+    margin: 0;
+    font-size: 12.5px;
+    opacity: 0.85;
+    letter-spacing: 0.3px;
+  }
+
+  /* ============================================================
+     CLICK-TO-START OVERLAY
+     Assumption: the document does not describe a start screen,
+     but Pointer Lock requires a user gesture to engage mouse-look.
+     Styled to match the same glass panel language as #ui so it
+     reads as part of the same interface rather than a foreign
+     addition.
+  ============================================================ */
+  #start-screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(255,148,114,0.15) 0%, rgba(0,0,0,0.75) 70%);
+    z-index: 200;
+    cursor: pointer;
+  }
+  #start-panel {
+    background: rgba(0,0,0,.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 18px;
+    padding: 28px 40px;
+    text-align: center;
+    color: #fff;
+  }
+  #start-panel h1 {
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    letter-spacing: 0.5px;
+  }
+  #start-panel p {
+    margin: 0;
+    font-size: 13px;
+    opacity: 0.8;
+  }
+  #start-panel .hint {
+    margin-top: 14px;
+    font-size: 11px;
+    opacity: 0.6;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+
+  /* Crosshair to reinforce first-person pointer-lock navigation */
+  #crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 6px; height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.6);
+    box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    z-index: 90;
+    pointer-events: none;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="app"></canvas>
+
+<!-- UI Layer: Fig 1.1 / Fig 2.1 top title + instructions overlay -->
+<div id="ui">
+  <h2>GOA LUXURY BEACH VR</h2>
+  <p>WASD Movement &bull; Mouse Look &bull; Explore Scenic Viewpoints</p>
+</div>
+
+<div id="crosshair"></div>
+
+<div id="start-screen">
+  <div id="start-panel">
+    <h1>GOA LUXURY BEACH VR</h1>
+    <p>Click anywhere to enter the resort</p>
+    <div class="hint">WASD to move &nbsp;&middot;&nbsp; Mouse to look &nbsp;&middot;&nbsp; ESC to release</div>
+  </div>
+</div>
+
+<!-- Three.js core (r128, matches project constraint set) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+/* ==================================================================
+   GOA LUXURY BEACH VR — Three.js / WebXR recreation
+   Rebuilt from the project documentation's A-Frame source excerpts
+   (Sections 4.B - 4.K) and the two browser-preview screenshots.
+   Every primitive, color, position, and animation duration below is
+   translated 1:1 from the documented <a-*> markup into equivalent
+   Three.js geometries / materials, so the *visual result* in-browser
+   matches the described scene, camera, lighting and motion.
+   ================================================================== */
+
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------
+  // Renderer  (Section 4.B: antialias:true, physicallyCorrectLights,
+  // colorManagement:true, shadow type:pcfsoft)
+  // ---------------------------------------------------------------
+  const canvas = document.getElementById('app');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap; // matches shadow="type:pcfsoft"
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+
+  // ---------------------------------------------------------------
+  // Scene + Fog  (fog="type:linear; color:#ffb18a; near:140; far:420")
+  // ---------------------------------------------------------------
+  const scene = new THREE.Scene();
+  const FOG_COLOR = 0xffb18a;
+  scene.fog = new THREE.Fog(FOG_COLOR, 140, 420);
+  scene.background = new THREE.Color(0xff9472); // <a-sky color="#ff9472">
+
+  // ---------------------------------------------------------------
+  // Camera  (<a-entity position="0 1.7 28"> containing <a-camera>)
+  // ---------------------------------------------------------------
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 600);
+  const cameraRig = new THREE.Object3D();
+  cameraRig.position.set(0, 1.7, 28); // documented starting position on the boardwalk
+  cameraRig.add(camera);
+  scene.add(cameraRig);
+
+  // ================================================================
+  // ENVIRONMENT LAYER
+  // ================================================================
+
+  // Atmosphere sphere: <a-sphere radius="500" side="back" color="#ff9c75" opacity="0.30">
+  const atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(500, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0xff9c75, transparent: true, opacity: 0.30, side: THREE.BackSide, fog: false })
+  );
+  scene.add(atmosphere);
+
+  // Glowing sun sphere: <a-sphere position="0 35 -240" radius="12" color="#ffd38b" emissive>
+  const sunGeo = new THREE.SphereGeometry(12, 24, 24);
+  const sunMat = new THREE.MeshStandardMaterial({
+    color: 0xffd38b, emissive: 0xffd38b, emissiveIntensity: 1.5, fog: false
+  });
+  const sun = new THREE.Mesh(sunGeo, sunMat);
+  sun.position.set(0, 35, -240);
+  scene.add(sun);
+  // soft glow halo around the sun disc (visual approximation, not in source doc)
+  const sunGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(20, 24, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd38b, transparent: true, opacity: 0.25, fog: false })
+  );
+  sunGlow.position.copy(sun.position);
+  scene.add(sunGlow);
+
+  // ---------------------------------------------------------------
+  // Beach ground  (Section 4.D)
+  // ---------------------------------------------------------------
+  const sandMat = new THREE.MeshStandardMaterial({ color: 0xe8c27b, roughness: 1 });
+  const sandGeo = new THREE.PlaneGeometry(500, 220);
+  const sand = new THREE.Mesh(sandGeo, sandMat);
+  sand.rotation.x = -Math.PI / 2;
+  sand.receiveShadow = true;
+  scene.add(sand);
+
+  const wetSandMat = new THREE.MeshStandardMaterial({ color: 0xd9ba85, roughness: 1 });
+  const wetSand = new THREE.Mesh(new THREE.PlaneGeometry(500, 60), wetSandMat);
+  wetSand.rotation.x = -Math.PI / 2;
+  wetSand.position.set(0, 0.02, -65);
+  scene.add(wetSand);
+
+  // Boardwalk: wooden planks connecting scene (mentioned in Key Features / Architecture)
+  const boardwalkMat = new THREE.MeshStandardMaterial({ color: 0x8a6540, roughness: 0.9 });
+  const boardwalk = new THREE.Mesh(new THREE.PlaneGeometry(6, 60), boardwalkMat);
+  boardwalk.rotation.x = -Math.PI / 2;
+  boardwalk.position.set(0, 0.03, 5);
+  boardwalk.receiveShadow = true;
+  scene.add(boardwalk);
+  for (let i = -25; i <= 30; i += 2) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(6, 0.06, 0.15), new THREE.MeshStandardMaterial({ color: 0x7a583a }));
+    plank.position.set(0, 0.06, i);
+    scene.add(plank);
+  }
+
+  // ---------------------------------------------------------------
+  // Ocean module  (Section 4.E)
+  // ---------------------------------------------------------------
+  const oceanBase = new THREE.Mesh(
+    new THREE.PlaneGeometry(900, 700),
+    new THREE.MeshStandardMaterial({ color: 0x35cfd0, transparent: true, opacity: 0.95, roughness: 0.3 })
+  );
+  oceanBase.rotation.x = -Math.PI / 2;
+  oceanBase.position.set(0, -0.05, -170);
+  scene.add(oceanBase);
+
+  const waveLayer = new THREE.Mesh(
+    new THREE.PlaneGeometry(900, 700),
+    new THREE.MeshStandardMaterial({ color: 0x67f0ef, transparent: true, opacity: 0.15 })
+  );
+  waveLayer.rotation.x = -Math.PI / 2;
+  waveLayer.position.set(0, 0.12, -150);
+  scene.add(waveLayer);
+
+  const foam = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
+  );
+  foam.rotation.x = -Math.PI / 2;
+  foam.position.set(0, 0.05, -78);
+  scene.add(foam);
+
+  // ================================================================
+  // OBJECT LAYER
+  // ================================================================
+
+  // ---- Resort villa module (Section 4.F), mirrored at x = -22 / +22
+  function buildVilla(xSign) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(16, 8, 12),
+      new THREE.MeshStandardMaterial({ color: 0xf7f5f2, roughness: 0.8 })
+    );
+    body.position.set(0, 4, 0);
+    body.castShadow = true;
+    group.add(body);
+
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(18, 1, 14),
+      new THREE.MeshStandardMaterial({ color: 0x4f4137 })
+    );
+    roof.position.set(0, 8.5, 0);
+    group.add(roof);
+
+    const window_ = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 4, 0.2),
+      new THREE.MeshPhysicalMaterial({ color: 0x9fdfff, transparent: true, opacity: 0.65, roughness: 0.1, metalness: 0.1 })
+    );
+    window_.position.set(0, 3, 6.1); // window faces the boardwalk (+Z, mirrored offset applied below)
+    group.add(window_);
+
+    group.position.set(22 * xSign, 0, -15);
+    return group;
+  }
+  scene.add(buildVilla(-1));
+  scene.add(buildVilla(1));
+
+  // ---- Beach cafe module (Section 4.G): "Sunset Lounge"
+  const cafeGroup = new THREE.Group();
+  const cafeBody = new THREE.Mesh(
+    new THREE.BoxGeometry(12, 6, 8),
+    new THREE.MeshStandardMaterial({ color: 0xf6f1ea, roughness: 0.85 })
+  );
+  cafeBody.position.set(0, 3, 18);
+  cafeBody.castShadow = true;
+  cafeGroup.add(cafeBody);
+
+  const cafeRoof = new THREE.Mesh(
+    new THREE.BoxGeometry(13, 0.8, 9),
+    new THREE.MeshStandardMaterial({ color: 0x4f4137 })
+  );
+  cafeRoof.position.set(0, 6.4, 18);
+  cafeGroup.add(cafeRoof);
+
+  // "SUNSET LOUNGE" signage — canvas-texture plane approximates <a-text>
+  function makeTextSprite(text, w, h, fontSize, color) {
+    const canvasEl = document.createElement('canvas');
+    const scale = 64;
+    canvasEl.width = w * scale;
+    canvasEl.height = h * scale;
+    const ctx = canvasEl.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvasEl.width / 2, canvasEl.height / 2);
+    const tex = new THREE.CanvasTexture(canvasEl);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: false });
+    const geo = new THREE.PlaneGeometry(w, h);
+    return new THREE.Mesh(geo, mat);
+  }
+  const signage = makeTextSprite('SUNSET LOUNGE', 10, 1.6, 90, '#2c2c2c');
+  signage.position.set(0, 5.5, 22.2);
+  cafeGroup.add(signage);
+
+  const stoolPositions = [-3, 0, 3];
+  stoolPositions.forEach((x) => {
+    const stool = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.8, 0.8, 0.5, 16),
+      new THREE.MeshStandardMaterial({ color: 0xe0d4c1 })
+    );
+    stool.position.set(x, 0.5, 26);
+    stool.castShadow = true;
+    cafeGroup.add(stool);
+  });
+  scene.add(cafeGroup);
+
+  // ---- Palm tree module (Section 4.H): trunk + canopy, swaying animation
+  const palms = [];
+  function buildPalm(x, z, phase) {
+    const group = new THREE.Group();
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x7d5538 })
+    );
+    trunk.position.y = 4;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const canopy = new THREE.Mesh(
+      new THREE.SphereGeometry(2.3, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0x2f8f52 })
+    );
+    canopy.position.y = 8.5;
+    canopy.castShadow = true;
+    group.add(canopy);
+
+    group.position.set(x, 0, z);
+    group.userData.phase = phase;
+    group.userData.baseRotZ = 0;
+    scene.add(group);
+    palms.push(group);
+  }
+  // Grouped placement on both sides of the boardwalk (documented, exact count unspecified —
+  // assumption: 4 palms per side at varied depth for a natural grove feel)
+  buildPalm(-35, -10, 0);
+  buildPalm(-30, -22, 0.6);
+  buildPalm(-40, 2, 1.2);
+  buildPalm(-33, 14, 1.8);
+  buildPalm(35, -10, 0.3);
+  buildPalm(30, -22, 0.9);
+  buildPalm(40, 2, 1.5);
+  buildPalm(33, 14, 2.1);
+
+  // ---- Yacht module (Section 4.I)
+  const yachtGroup = new THREE.Group();
+  const hull = new THREE.Mesh(
+    new THREE.BoxGeometry(14, 2, 4),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
+  );
+  hull.position.set(0, 1, 0);
+  yachtGroup.add(hull);
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(5, 2, 3),
+    new THREE.MeshStandardMaterial({ color: 0xececec })
+  );
+  cabin.position.set(0, 3, 0);
+  yachtGroup.add(cabin);
+  const mast = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0x444444 })
+  );
+  mast.position.set(0, 8, 0);
+  yachtGroup.add(mast);
+  yachtGroup.position.set(35, 0, -105);
+  scene.add(yachtGroup);
+
+  // Distant background boats (flat, static boxes for depth — Section 4.I)
+  [[70, -160], [-60, -180]].forEach(([x, z]) => {
+    const boat = new THREE.Mesh(
+      new THREE.BoxGeometry(6, 1, 2),
+      new THREE.MeshStandardMaterial({ color: 0xdddddd, fog: true })
+    );
+    boat.position.set(x, 0.5, z);
+    scene.add(boat);
+  });
+
+  // ---- Seagulls (Section 4.K): two entities on long looping flight paths
+  const seagulls = [];
+  function buildSeagull() {
+    const body = new THREE.Group();
+    const wingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const wingGeo = new THREE.ConeGeometry(0.4, 1.6, 4);
+    const left = new THREE.Mesh(wingGeo, wingMat);
+    left.rotation.z = Math.PI / 2.4;
+    left.position.x = -0.6;
+    const right = new THREE.Mesh(wingGeo, wingMat);
+    right.rotation.z = -Math.PI / 2.4;
+    right.position.x = 0.6;
+    body.add(left, right);
+    return body;
+  }
+  const gull1 = buildSeagull();
+  gull1.userData = { start: new THREE.Vector3(-40, 22, -60), end: new THREE.Vector3(50, 28, -150), t: 0, dur: 18000 };
+  gull1.position.copy(gull1.userData.start);
+  scene.add(gull1);
+  seagulls.push(gull1);
+
+  const gull2 = buildSeagull();
+  gull2.userData = { start: new THREE.Vector3(45, 24, -50), end: new THREE.Vector3(-45, 30, -160), t: 0, dur: 21000 };
+  gull2.position.copy(gull2.userData.start);
+  scene.add(gull2);
+  seagulls.push(gull2);
+
+  // ---- Scenic viewpoint markers (thin glowing rings on the sand)
+  [[-15, 40], [15, -30], [0, -100]].forEach(([x, z]) => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.4, 1.7, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffd889, transparent: true, opacity: 0.6, side: THREE.DoubleSide, fog: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.04, z);
+    scene.add(ring);
+  });
+
+  // ================================================================
+  // LIGHTING LAYER  (Section 4.J)
+  // ================================================================
+  const ambient = new THREE.AmbientLight(0xffe6c7, 1.0);
+  scene.add(ambient);
+
+  const directional = new THREE.DirectionalLight(0xffbc87, 1.5);
+  directional.position.set(0, 45, -120);
+  directional.castShadow = true;
+  directional.shadow.mapSize.set(2048, 2048);
+  directional.shadow.camera.left = -150;
+  directional.shadow.camera.right = 150;
+  directional.shadow.camera.top = 150;
+  directional.shadow.camera.bottom = -150;
+  directional.shadow.camera.near = 1;
+  directional.shadow.camera.far = 400;
+  scene.add(directional);
+
+  // Lantern point lights (documented one near villas; assumption: mirrored + one at cafe)
+  const lanternPositions = [
+    [-6, 4.2, -5],
+    [6, 4.2, -5],
+    [0, 4.5, 18],
+  ];
+  lanternPositions.forEach(([x, y, z]) => {
+    const light = new THREE.PointLight(0xffd889, 1.3, 40);
+    light.position.set(x, y, z);
+    scene.add(light);
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd889, fog: false })
+    );
+    bulb.position.copy(light.position);
+    scene.add(bulb);
+  });
+
+  // ================================================================
+  // CAMERA CONTROLS: WASD movement (acceleration:45) + pointer-lock
+  // look-controls, replicating <a-camera wasd-controls look-controls>
+  // ================================================================
+  const move = { forward: false, back: false, left: false, right: false };
+  let yaw = 0;   // horizontal look
+  let pitch = 0; // vertical look
+  const ACCELERATION = 45; // matches wasd-controls="acceleration:45"
+  const velocity = new THREE.Vector3();
+  let pointerLocked = false;
+
+  const startScreen = document.getElementById('start-screen');
+  const crosshair = document.getElementById('crosshair');
+
+  startScreen.addEventListener('click', () => {
+    canvas.requestPointerLock =
+      canvas.requestPointerLock || canvas.mozRequestPointerLock || canvas.webkitRequestPointerLock;
+    canvas.requestPointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', onPointerLockChange, false);
+  document.addEventListener('mozpointerlockchange', onPointerLockChange, false);
+  document.addEventListener('webkitpointerlockchange', onPointerLockChange, false);
+
+  function onPointerLockChange() {
+    pointerLocked = (document.pointerLockElement === canvas ||
+                      document.mozPointerLockElement === canvas ||
+                      document.webkitPointerLockElement === canvas);
+    startScreen.style.display = pointerLocked ? 'none' : 'flex';
+    crosshair.style.display = pointerLocked ? 'block' : 'none';
+  }
+
+  document.addEventListener('mousemove', (e) => {
+    if (!pointerLocked) return;
+    const dx = e.movementX || 0;
+    const dy = e.movementY || 0;
+    yaw -= dx * 0.0022;
+    pitch -= dy * 0.0022;
+    pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, pitch));
+    cameraRig.rotation.y = yaw;
+    camera.rotation.x = pitch;
+  });
+
+  window.addEventListener('keydown', (e) => setMove(e.code, true));
+  window.addEventListener('keyup', (e) => setMove(e.code, false));
+  function setMove(code, state) {
+    switch (code) {
+      case 'KeyW': case 'ArrowUp': move.forward = state; break;
+      case 'KeyS': case 'ArrowDown': move.back = state; break;
+      case 'KeyA': case 'ArrowLeft': move.left = state; break;
+      case 'KeyD': case 'ArrowRight': move.right = state; break;
+    }
+  }
+
+  const FLOOR_Y = 1.7;
+  const WORLD_BOUND = 240;
+
+  function updateMovement(delta) {
+    const damping = 8.0;
+    const accel = new THREE.Vector3();
+    const forwardVec = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
+    const rightVec = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+
+    if (move.forward) accel.add(forwardVec);
+    if (move.back) accel.addScaledVector(forwardVec, -1);
+    if (move.right) accel.add(rightVec);
+    if (move.left) accel.addScaledVector(rightVec, -1);
+    if (accel.lengthSq() > 0) accel.normalize().multiplyScalar(ACCELERATION);
+
+    velocity.addScaledVector(accel, delta);
+    velocity.multiplyScalar(Math.max(0, 1 - damping * delta));
+
+    cameraRig.position.addScaledVector(velocity, delta);
+    cameraRig.position.y = FLOOR_Y;
+    cameraRig.position.x = Math.max(-WORLD_BOUND, Math.min(WORLD_BOUND, cameraRig.position.x));
+    cameraRig.position.z = Math.max(-WORLD_BOUND + 60, Math.min(WORLD_BOUND, cameraRig.position.z));
+  }
+
+  // ================================================================
+  // ANIMATION LAYER (Section 4.K)
+  // ================================================================
+  const clock = new THREE.Clock();
+
+  function animateAlternate(elapsedMs, durationMs) {
+    // Reproduces A-Frame's dir:"alternate" loop:"true" behaviour: a
+    // 0->1->0 ping-pong driven by a triangle wave over `durationMs`.
+    const t = (elapsedMs % durationMs) / durationMs; // 0..1
+    return t < 0.5 ? t * 2 : 2 - t * 2; // triangle wave 0..1..0
+  }
+
+  function render() {
+    const delta = Math.min(clock.getDelta(), 0.05);
+    const elapsed = clock.elapsedTime * 1000;
+
+    updateMovement(delta);
+
+    // Ocean wave layer: position.y alternates 0.12 <-> 0.28 over 5000ms
+    const waveT = animateAlternate(elapsed, 5000);
+    waveLayer.position.y = 0.12 + waveT * (0.28 - 0.12);
+
+    // Yacht bobbing: position.y alternates 1 <-> 1.6 over 4000ms
+    const yachtT = animateAlternate(elapsed, 4000);
+    yachtGroup.position.y = 1 + yachtT * (1.6 - 1);
+
+    // Palm sway: rotation.z alternates 0 <-> ~4deg over 4500ms (staggered by phase)
+    palms.forEach((palm) => {
+      const palmElapsed = elapsed + palm.userData.phase * 1000;
+      const swayT = animateAlternate(palmElapsed, 4500);
+      palm.rotation.z = THREE.MathUtils.degToRad(4) * swayT;
+    });
+
+    // Seagulls: linear looping flight path, position lerp start->end over dur
+    seagulls.forEach((gull) => {
+      const d = gull.userData;
+      const t = (elapsed % d.dur) / d.dur;
+      gull.position.lerpVectors(d.start, d.end, t);
+      gull.lookAt(d.end);
+      // simple wing flap
+      const flap = Math.sin(elapsed * 0.01) * 0.3;
+      gull.children[0].rotation.x = flap;
+      gull.children[1].rotation.x = -flap;
+    });
+
+    // Sun / glow gentle pulse (visual polish, not explicitly in source doc)
+    const pulse = 1 + Math.sin(elapsed * 0.0006) * 0.03;
+    sunGlow.scale.setScalar(pulse);
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ================================================================
+  // WebXR: VR-ready camera setup (Key Feature: WebVR / immersive mode)
+  // Assumption: the original project targeted WebVR; this recreation
+  // exposes an XR button using the modern WebXR API where available,
+  // since browser WebVR support has been removed industry-wide.
+  // ================================================================
+  if (navigator.xr) {
+    renderer.xr.enabled = true;
+    navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+      if (!supported) return;
+      const xrBtn = document.createElement('button');
+      xrBtn.textContent = 'Enter VR';
+      xrBtn.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);' +
+        'z-index:150;padding:10px 22px;border-radius:14px;border:1px solid rgba(255,255,255,.25);' +
+        'background:rgba(0,0,0,.45);color:#fff;font-size:13px;letter-spacing:.4px;cursor:pointer;' +
+        'backdrop-filter:blur(8px);';
+      document.body.appendChild(xrBtn);
+      xrBtn.addEventListener('click', async () => {
+        const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+        renderer.xr.setSession(session);
+        renderer.setAnimationLoop(render);
+      });
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
